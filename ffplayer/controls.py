@@ -22,11 +22,13 @@ def format_time(seconds):
 
 class SeekSlider(QSlider):
     seek_requested = Signal(float)
+    drag_position = Signal(float)
 
     def __init__(self, orientation=Qt.Horizontal, parent=None):
         super().__init__(orientation, parent)
         self._duration = 0
         self._seeking = False
+        self._last_drag_val = 0
         self.setRange(0, 10000)
         self.setValue(0)
         self.setCursor(Qt.PointingHandCursor)
@@ -46,12 +48,17 @@ class SeekSlider(QSlider):
             self._seeking = True
             val = self._pos_from_event(event)
             self.setValue(val)
+            self._last_drag_val = val
+            self._emit_drag()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._seeking:
             val = self._pos_from_event(event)
-            self.setValue(val)
+            if val != self._last_drag_val:
+                self.setValue(val)
+                self._last_drag_val = val
+                self._emit_drag()
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -63,6 +70,11 @@ class SeekSlider(QSlider):
     def _pos_from_event(self, event):
         ratio = event.position().x() / self.width()
         return int(max(0, min(10000, ratio * 10000)))
+
+    def _emit_drag(self):
+        if self._duration > 0:
+            pos = self.value() / 10000.0 * self._duration
+            self.drag_position.emit(pos)
 
     def _emit_seek(self):
         if self._duration > 0:
@@ -98,6 +110,7 @@ class PlaybackControls(QWidget):
     play_toggled = Signal()
     stop_clicked = Signal()
     seek_requested = Signal(float)
+    seek_dragging = Signal(float)
     volume_changed = Signal(int)
     mute_toggled = Signal()
     fullscreen_toggled = Signal()
@@ -136,6 +149,7 @@ class PlaybackControls(QWidget):
 
         self.seek_slider = SeekSlider()
         self.seek_slider.seek_requested.connect(self.seek_requested)
+        self.seek_slider.drag_position.connect(self.seek_dragging)
 
         self.mute_btn = QPushButton()
         self.mute_btn.setFixedSize(26, 26)

@@ -416,6 +416,35 @@ class FFPlayWidget(QWidget):
             else:
                 self._send_key(self.VK_PGUP)
 
+    def seek_toward(self, target_position):
+        if not self._ffplay_hwnd or not self._current_file or self._duration <= 0:
+            return
+        target = max(0, min(self._duration, target_position))
+        diff = target - self._position
+        if abs(diff) < 1:
+            return
+        if diff > 0:
+            if diff <= 10:
+                self._send_key(self.VK_RIGHT)
+                self._position += 10
+            elif diff <= 60:
+                self._send_key(self.VK_DOWN)
+                self._position += 60
+            else:
+                self._send_key(self.VK_PGDN)
+                self._position += 600
+        else:
+            if diff >= -10:
+                self._send_key(self.VK_LEFT)
+                self._position -= 10
+            elif diff >= -60:
+                self._send_key(self.VK_UP)
+                self._position -= 60
+            else:
+                self._send_key(self.VK_PGUP)
+                self._position -= 600
+        self._position = max(0, min(self._duration, self._position))
+
     def stop(self):
         self._kill_process()
         self._position_timer.stop()

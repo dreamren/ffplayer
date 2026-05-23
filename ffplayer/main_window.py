@@ -67,6 +67,7 @@ class MainWindow(QMainWindow):
         self.controls.play_toggled.connect(self._toggle_play)
         self.controls.stop_clicked.connect(self._stop)
         self.controls.seek_requested.connect(self.video.seek)
+        self.controls.seek_dragging.connect(self.video.seek_toward)
         self.controls.volume_changed.connect(self._set_volume)
         self.controls.mute_toggled.connect(self._toggle_mute)
         self.controls.fullscreen_toggled.connect(self._toggle_fullscreen)
@@ -436,7 +437,7 @@ class MainWindow(QMainWindow):
             self,
             '关于 FFPlayer',
             '<h2>FFPlayer</h2>'
-            '<p>版本 1.1.0</p>'
+            '<p>版本 1.2.0</p>'
             '<p>基于 ffplay (ffmpeg) 的轻量级视频播放器</p>'
             '<p>针对 ARM64 软解优化</p>'
             '<p>使用 PySide6 + ffplay 子进程构建</p>',
