@@ -22,13 +22,14 @@ def format_time(seconds):
 
 class SeekSlider(QSlider):
     seek_requested = Signal(float)
-    drag_position = Signal(float)
+    drag_started = Signal(float)
+    drag_moved = Signal(float)
+    drag_ended = Signal(float)
 
     def __init__(self, orientation=Qt.Horizontal, parent=None):
         super().__init__(orientation, parent)
         self._duration = 0
         self._seeking = False
-        self._last_drag_val = 0
         self.setRange(0, 10000)
         self.setValue(0)
         self.setCursor(Qt.PointingHandCursor)
@@ -48,17 +49,14 @@ class SeekSlider(QSlider):
             self._seeking = True
             val = self._pos_from_event(event)
             self.setValue(val)
-            self._last_drag_val = val
-            self._emit_drag()
+            self._emit_drag_started()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._seeking:
             val = self._pos_from_event(event)
-            if val != self._last_drag_val:
-                self.setValue(val)
-                self._last_drag_val = val
-                self._emit_drag()
+            self.setValue(val)
+            self._emit_drag_moved()
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -71,24 +69,25 @@ class SeekSlider(QSlider):
         ratio = event.position().x() / self.width()
         return int(max(0, min(10000, ratio * 10000)))
 
-    def _emit_drag(self):
+    def _emit_drag_started(self):
         if self._duration > 0:
             pos = self.value() / 10000.0 * self._duration
-            self.drag_position.emit(pos)
+            self.drag_started.emit(pos)
+
+    def _emit_drag_moved(self):
+        if self._duration > 0:
+            pos = self.value() / 10000.0 * self._duration
+            self.drag_moved.emit(pos)
 
     def _emit_seek(self):
         if self._duration > 0:
             pos = self.value() / 10000.0 * self._duration
             self.seek_requested.emit(pos)
+            self.drag_ended.emit(pos)
 
     @property
     def is_seeking(self):
         return self._seeking
-
-    def get_seek_position(self):
-        if self._duration > 0:
-            return self.value() / 10000.0 * self._duration
-        return 0
 
 
 class VolumeSlider(QSlider):
@@ -110,7 +109,9 @@ class PlaybackControls(QWidget):
     play_toggled = Signal()
     stop_clicked = Signal()
     seek_requested = Signal(float)
-    seek_dragging = Signal(float)
+    seek_drag_started = Signal(float)
+    seek_drag_moved = Signal(float)
+    seek_drag_ended = Signal(float)
     volume_changed = Signal(int)
     mute_toggled = Signal()
     fullscreen_toggled = Signal()
@@ -149,7 +150,9 @@ class PlaybackControls(QWidget):
 
         self.seek_slider = SeekSlider()
         self.seek_slider.seek_requested.connect(self.seek_requested)
-        self.seek_slider.drag_position.connect(self.seek_dragging)
+        self.seek_slider.drag_started.connect(self.seek_drag_started)
+        self.seek_slider.drag_moved.connect(self.seek_drag_moved)
+        self.seek_slider.drag_ended.connect(self.seek_drag_ended)
 
         self.mute_btn = QPushButton()
         self.mute_btn.setFixedSize(26, 26)

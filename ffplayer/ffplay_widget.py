@@ -51,6 +51,7 @@ class FFPlayWidget(QWidget):
         self._embed_retries = 0
         self._pending_pause = False
         self._stderr_lines = []
+        self._drag_target = None
 
         self._position_timer = QTimer(self)
         self._position_timer.setInterval(200)
@@ -59,6 +60,10 @@ class FFPlayWidget(QWidget):
         self._monitor_timer = QTimer(self)
         self._monitor_timer.setInterval(500)
         self._monitor_timer.timeout.connect(self._monitor_process)
+
+        self._drag_seek_timer = QTimer(self)
+        self._drag_seek_timer.setInterval(30)
+        self._drag_seek_timer.timeout.connect(self._drag_seek_tick)
 
     @staticmethod
     def _find_binary(name):
@@ -151,12 +156,11 @@ class FFPlayWidget(QWidget):
         cmd = [
             self._ffplay_path,
             '-noborder',
+            '-fs',
             '-window_title', window_title,
             '-autoexit',
             '-stats',
             '-volume', str(self._volume),
-            '-x', str(max(320, self.width())),
-            '-y', str(max(180, self.height())),
         ]
 
         if start_position > 0:
@@ -212,6 +216,8 @@ class FFPlayWidget(QWidget):
 
     def _kill_process(self):
         self._running = False
+        self._drag_seek_timer.stop()
+        self._drag_target = None
         if self._process and self._process.poll() is None:
             self._process.terminate()
             try:
@@ -249,7 +255,8 @@ class FFPlayWidget(QWidget):
                             h, m, s = int(parts[0]), int(parts[1]), float(parts[2])
                             pos = h * 3600 + m * 60 + s
                             self._position = pos
-                            self.time_changed.emit(pos)
+                            if self._drag_target is None:
+                                self.time_changed.emit(pos)
                         except (ValueError, IndexError):
                             pass
         except Exception:
@@ -346,7 +353,8 @@ class FFPlayWidget(QWidget):
             approx_pos = self._start_position + elapsed * self._speed
             if abs(approx_pos - self._position) > 0.5:
                 self._position = min(approx_pos, self._duration)
-                self.time_changed.emit(self._position)
+                if self._drag_target is None:
+                    self.time_changed.emit(self._position)
 
     def _monitor_process(self):
         if self._process and self._process.poll() is not None:
@@ -354,6 +362,8 @@ class FFPlayWidget(QWidget):
             self._running = False
             self._position_timer.stop()
             self._monitor_timer.stop()
+            self._drag_seek_timer.stop()
+            self._drag_target = None
             if exit_code == 0:
                 self.eof_reached.emit()
             elif exit_code != 0 and self._stderr_lines:
@@ -416,34 +426,55 @@ class FFPlayWidget(QWidget):
             else:
                 self._send_key(self.VK_PGUP)
 
-    def seek_toward(self, target_position):
-        if not self._ffplay_hwnd or not self._current_file or self._duration <= 0:
+    def start_drag_seek(self, target_position):
+        self._drag_target = max(0, min(self._duration, target_position))
+        if not self._drag_seek_timer.isActive():
+            self._drag_seek_timer.start()
+
+    def update_drag_seek(self, target_position):
+        self._drag_target = max(0, min(self._duration, target_position))
+
+    def end_drag_seek(self, target_position):
+        self._drag_target = None
+        self._drag_seek_timer.stop()
+        self.seek(max(0, min(self._duration, target_position)))
+
+    def _drag_seek_tick(self):
+        if self._drag_target is None or not self._ffplay_hwnd:
+            self._drag_seek_timer.stop()
             return
-        target = max(0, min(self._duration, target_position))
-        diff = target - self._position
-        if abs(diff) < 1:
+        diff = self._drag_target - self._position
+        if abs(diff) < 0.5:
             return
         if diff > 0:
             if diff <= 10:
                 self._send_key(self.VK_RIGHT)
-                self._position += 10
-            elif diff <= 60:
+                self._position = min(self._position + 10, self._drag_target)
+            elif diff <= 30:
+                self._send_key(self.VK_RIGHT)
+                self._send_key(self.VK_RIGHT)
+                self._position = min(self._position + 20, self._drag_target)
+            elif diff <= 120:
                 self._send_key(self.VK_DOWN)
-                self._position += 60
+                self._position = min(self._position + 60, self._drag_target)
             else:
                 self._send_key(self.VK_PGDN)
-                self._position += 600
+                self._position = min(self._position + 600, self._drag_target)
         else:
             if diff >= -10:
                 self._send_key(self.VK_LEFT)
-                self._position -= 10
-            elif diff >= -60:
+                self._position = max(self._position - 10, self._drag_target)
+            elif diff >= -30:
+                self._send_key(self.VK_LEFT)
+                self._send_key(self.VK_LEFT)
+                self._position = max(self._position - 20, self._drag_target)
+            elif diff >= -120:
                 self._send_key(self.VK_UP)
-                self._position -= 60
+                self._position = max(self._position - 60, self._drag_target)
             else:
                 self._send_key(self.VK_PGUP)
-                self._position -= 600
-        self._position = max(0, min(self._duration, self._position))
+                self._position = max(self._position - 600, self._drag_target)
+        self.time_changed.emit(self._position)
 
     def stop(self):
         self._kill_process()
