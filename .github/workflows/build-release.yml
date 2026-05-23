@@ -1,0 +1,102 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-11-arm
+            arch: arm64
+            btbn_suffix: winarm64-gpl
+          - runner: windows-latest
+            arch: x64
+            btbn_suffix: win64-gpl
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Download ffmpeg (includes ffplay, ffprobe)
+        shell: pwsh
+        run: |
+          $suffix = "${{ matrix.btbn_suffix }}"
+          Write-Host "Fetching latest ffmpeg build for $suffix..."
+          $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
+          $asset = $releases.assets | Where-Object { $_.name -match "ffmpeg-master-latest-$suffix\.zip$" } | Select-Object -First 1
+          if (-not $asset) {
+            Write-Error "Could not find ffmpeg package for $suffix"
+            exit 1
+          }
+          Write-Host "Downloading $($asset.name)..."
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile "ffmpeg-build.zip"
+          Expand-Archive -Path ffmpeg-build.zip -DestinationPath ffmpeg-build -Force
+
+          $binDir = Get-ChildItem -Path ffmpeg-build -Directory | Select-Object -First 1
+          $binPath = Join-Path $binDir.FullName "bin"
+          Write-Host "Bin directory: $binPath"
+          Get-ChildItem $binPath
+
+          Copy-Item (Join-Path $binPath "ffplay.exe") .
+          Copy-Item (Join-Path $binPath "ffprobe.exe") .
+          Copy-Item (Join-Path $binPath "ffmpeg.exe") .
+
+          Write-Host "ffplay.exe, ffprobe.exe, ffmpeg.exe copied to project root"
+
+      - name: Build with PyInstaller
+        run: pyinstaller ffplayer.spec
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FFPlayer-Windows-${{ matrix.arch }}
+          path: dist/FFPlayer/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create distribution packages
+        run: |
+          cd artifacts
+          for dir in */; do
+            dirname="${dir%/}"
+            cd "$dirname"
+            zip -r "../FFPlayer-${dirname}.zip" .
+            cd ..
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "ffplayer"
+version = "1.0.0"
+description = "A lightweight video player based on ffplay (ffmpeg engine), optimized for ARM64 software decoding"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "PySide6>=6.5",
+]
+
+[project.scripts]
+ffplayer = "ffplayer.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["ffplayer*"]
