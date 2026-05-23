@@ -6,7 +6,7 @@ WINDOW_SIZE_QUARTER = 2
 WINDOW_SIZE_DOUBLE = 3
 WINDOW_SIZE_FIT_SCREEN = 4
 
-SIZE_MODE_LABELS = ['Original', '1/2', '1/4', '2x', 'Fit to Screen']
+SIZE_MODE_LABELS = ['原始大小', '1/2', '1/4', '2倍', '适应屏幕']
 
 SIZE_MODE_FACTORS = {
     WINDOW_SIZE_ORIGINAL: 1.0,

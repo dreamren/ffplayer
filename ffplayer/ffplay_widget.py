@@ -16,6 +16,18 @@ class FFPlayWidget(QWidget):
     eof_reached = Signal()
     error_occurred = Signal(str)
 
+    VK_LEFT = 0x25
+    VK_UP = 0x26
+    VK_RIGHT = 0x27
+    VK_DOWN = 0x28
+    VK_SPACE = 0x20
+    VK_9 = 0x39
+    VK_0 = 0x30
+    VK_M = 0x4D
+    VK_F = 0x46
+    VK_PGDN = 0x22
+    VK_PGUP = 0x21
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumSize(320, 180)
@@ -41,7 +53,7 @@ class FFPlayWidget(QWidget):
         self._stderr_lines = []
 
         self._position_timer = QTimer(self)
-        self._position_timer.setInterval(250)
+        self._position_timer.setInterval(200)
         self._position_timer.timeout.connect(self._update_position)
 
         self._monitor_timer = QTimer(self)
@@ -169,13 +181,12 @@ class FFPlayWidget(QWidget):
             self._process = subprocess.Popen(cmd, **kwargs)
         except FileNotFoundError:
             self.error_occurred.emit(
-                'ffplay not found! Please put ffplay.exe in the '
-                'application directory or system PATH.'
+                '未找到 ffplay！请将 ffplay.exe 放在程序目录或系统 PATH 中。'
             )
             self._seeking = False
             return
         except Exception as e:
-            self.error_occurred.emit(f'Failed to start ffplay: {e}')
+            self.error_occurred.emit(f'启动 ffplay 失败: {e}')
             self._seeking = False
             return
 
@@ -192,7 +203,7 @@ class FFPlayWidget(QWidget):
         )
         self._stderr_thread.start()
 
-        QTimer.singleShot(300, self._try_embed_window)
+        QTimer.singleShot(200, self._try_embed_window)
 
         self._position_timer.start()
         self._monitor_timer.start()
@@ -259,8 +270,8 @@ class FFPlayWidget(QWidget):
 
             if not hwnd:
                 self._embed_retries += 1
-                if self._embed_retries < 20:
-                    QTimer.singleShot(200, self._try_embed_window)
+                if self._embed_retries < 25:
+                    QTimer.singleShot(150, self._try_embed_window)
                 return
 
             self._ffplay_hwnd = hwnd
@@ -308,7 +319,7 @@ class FFPlayWidget(QWidget):
 
     def _apply_pending_pause(self):
         if self._ffplay_hwnd:
-            self._send_key(0x20)
+            self._send_key(self.VK_SPACE)
         self._pending_pause = False
 
     def _resize_ffplay(self):
@@ -352,11 +363,23 @@ class FFPlayWidget(QWidget):
                     self.error_occurred.emit(err_msg[:200])
             self.state_changed.emit('paused')
 
+    def _send_key(self, vk_code):
+        if not self._ffplay_hwnd or sys.platform != 'win32':
+            return
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            WM_KEYDOWN = 0x0100
+            WM_KEYUP = 0x0101
+            user32.PostMessageW(self._ffplay_hwnd, WM_KEYDOWN, vk_code, 0)
+            user32.PostMessageW(self._ffplay_hwnd, WM_KEYUP, vk_code, 0xC0000001)
+        except Exception:
+            pass
+
     def pause(self):
         if not self._current_file:
             return
-        if self._ffplay_hwnd and sys.platform == 'win32':
-            self._send_key(0x20)
+        self._send_key(self.VK_SPACE)
         self._is_paused = not self._is_paused
         if self._is_paused:
             self.state_changed.emit('paused')
@@ -376,10 +399,22 @@ class FFPlayWidget(QWidget):
         self._is_paused = False
 
     def relative_seek(self, offset):
-        new_pos = max(0, self._position + offset)
-        if self._duration > 0:
-            new_pos = min(new_pos, self._duration)
-        self.seek(new_pos)
+        if not self._ffplay_hwnd or not self._current_file:
+            return
+        if offset > 0:
+            if offset <= 10:
+                self._send_key(self.VK_RIGHT)
+            elif offset <= 60:
+                self._send_key(self.VK_DOWN)
+            else:
+                self._send_key(self.VK_PGDN)
+        elif offset < 0:
+            if offset >= -10:
+                self._send_key(self.VK_LEFT)
+            elif offset >= -60:
+                self._send_key(self.VK_UP)
+            else:
+                self._send_key(self.VK_PGUP)
 
     def stop(self):
         self._kill_process()
@@ -388,19 +423,6 @@ class FFPlayWidget(QWidget):
         self._position = 0
         self._is_paused = True
         self.state_changed.emit('paused')
-
-    def _send_key(self, vk_code):
-        if not self._ffplay_hwnd or sys.platform != 'win32':
-            return
-        try:
-            import ctypes
-            user32 = ctypes.windll.user32
-            WM_KEYDOWN = 0x0100
-            WM_KEYUP = 0x0101
-            user32.PostMessageW(self._ffplay_hwnd, WM_KEYDOWN, vk_code, 0)
-            user32.PostMessageW(self._ffplay_hwnd, WM_KEYUP, vk_code, 0xC0000001)
-        except Exception:
-            pass
 
     @property
     def is_paused(self):
@@ -417,13 +439,13 @@ class FFPlayWidget(QWidget):
         if self._ffplay_hwnd and sys.platform == 'win32' and old_vol != self._volume:
             diff = self._volume - old_vol
             if diff > 0:
-                steps = min(diff // 3, 15)
-                for _ in range(max(1, steps)):
-                    self._send_key(0x30)
+                steps = max(1, diff // 2)
+                for _ in range(steps):
+                    self._send_key(self.VK_0)
             elif diff < 0:
-                steps = min(abs(diff) // 3, 15)
-                for _ in range(max(1, steps)):
-                    self._send_key(0x39)
+                steps = max(1, abs(diff) // 2)
+                for _ in range(steps):
+                    self._send_key(self.VK_9)
 
     @property
     def speed(self):
@@ -458,9 +480,6 @@ class FFPlayWidget(QWidget):
             subprocess.run(cmd, capture_output=True, timeout=10)
         except Exception:
             pass
-
-    def set_hwdec(self, mode):
-        pass
 
     @property
     def media_title(self):

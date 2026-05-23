@@ -32,6 +32,7 @@ class SeekSlider(QSlider):
         self.setCursor(Qt.PointingHandCursor)
         self.setSingleStep(100)
         self.setPageStep(500)
+        self.setFixedHeight(20)
 
     def set_duration(self, duration):
         self._duration = max(duration, 0)
@@ -45,14 +46,12 @@ class SeekSlider(QSlider):
             self._seeking = True
             val = self._pos_from_event(event)
             self.setValue(val)
-            self._emit_seek()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._seeking:
             val = self._pos_from_event(event)
             self.setValue(val)
-            self._emit_seek()
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -70,13 +69,22 @@ class SeekSlider(QSlider):
             pos = self.value() / 10000.0 * self._duration
             self.seek_requested.emit(pos)
 
+    @property
+    def is_seeking(self):
+        return self._seeking
+
+    def get_seek_position(self):
+        if self._duration > 0:
+            return self.value() / 10000.0 * self._duration
+        return 0
+
 
 class VolumeSlider(QSlider):
     def __init__(self, parent=None):
         super().__init__(Qt.Horizontal, parent)
         self.setRange(0, 100)
         self.setValue(100)
-        self.setFixedWidth(100)
+        self.setFixedWidth(90)
         self.setCursor(Qt.PointingHandCursor)
 
     def mousePressEvent(self, event):
@@ -96,45 +104,54 @@ class PlaybackControls(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setFixedHeight(48)
+        self.setAutoFillBackground(True)
+
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(6)
+        layout.setContentsMargins(10, 2, 10, 2)
+        layout.setSpacing(4)
 
         self._is_playing = False
         self._is_muted = False
         self._duration = 0
 
         self.play_btn = QPushButton()
-        self.play_btn.setFixedSize(32, 32)
+        self.play_btn.setFixedSize(30, 30)
         self.play_btn.setFocusPolicy(Qt.NoFocus)
+        self.play_btn.setToolTip('播放/暂停 (空格)')
         self.play_btn.clicked.connect(self.play_toggled)
         self._update_play_icon()
 
         self.stop_btn = QPushButton()
-        self.stop_btn.setFixedSize(32, 32)
+        self.stop_btn.setFixedSize(26, 26)
         self.stop_btn.setFocusPolicy(Qt.NoFocus)
+        self.stop_btn.setToolTip('停止')
         self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
         self.stop_btn.clicked.connect(self.stop_clicked)
+
+        self.time_label = QLabel('00:00 / 00:00')
+        self.time_label.setFixedWidth(120)
+        self.time_label.setAlignment(Qt.AlignCenter)
+        self.time_label.setStyleSheet('font-size: 12px; color: #a6adc8;')
 
         self.seek_slider = SeekSlider()
         self.seek_slider.seek_requested.connect(self.seek_requested)
 
-        self.time_label = QLabel('00:00 / 00:00')
-        self.time_label.setFixedWidth(130)
-        self.time_label.setAlignment(Qt.AlignCenter)
-
         self.mute_btn = QPushButton()
-        self.mute_btn.setFixedSize(28, 28)
+        self.mute_btn.setFixedSize(26, 26)
         self.mute_btn.setFocusPolicy(Qt.NoFocus)
+        self.mute_btn.setToolTip('静音 (M)')
         self.mute_btn.clicked.connect(self._on_mute)
         self._update_volume_icon()
 
         self.volume_slider = VolumeSlider()
+        self.volume_slider.setToolTip('音量')
         self.volume_slider.valueChanged.connect(self.volume_changed)
 
         self.fullscreen_btn = QPushButton()
-        self.fullscreen_btn.setFixedSize(28, 28)
+        self.fullscreen_btn.setFixedSize(26, 26)
         self.fullscreen_btn.setFocusPolicy(Qt.NoFocus)
+        self.fullscreen_btn.setToolTip('全屏 (F)')
         self.fullscreen_btn.setIcon(
             self.style().standardIcon(QStyle.SP_TitleBarMaxButton)
         )
@@ -142,8 +159,8 @@ class PlaybackControls(QWidget):
 
         layout.addWidget(self.play_btn)
         layout.addWidget(self.stop_btn)
-        layout.addWidget(self.seek_slider, 1)
         layout.addWidget(self.time_label)
+        layout.addWidget(self.seek_slider, 1)
         layout.addWidget(self.mute_btn)
         layout.addWidget(self.volume_slider)
         layout.addWidget(self.fullscreen_btn)
@@ -157,7 +174,8 @@ class PlaybackControls(QWidget):
         self.seek_slider.set_duration(duration)
 
     def set_position(self, position):
-        self.seek_slider.set_position(position)
+        if not self.seek_slider.is_seeking:
+            self.seek_slider.set_position(position)
         self.time_label.setText(
             f'{format_time(position)} / {format_time(self._duration)}'
         )
@@ -173,8 +191,10 @@ class PlaybackControls(QWidget):
         style = self.style()
         if self._is_playing:
             self.play_btn.setIcon(style.standardIcon(QStyle.SP_MediaPause))
+            self.play_btn.setToolTip('暂停 (空格)')
         else:
             self.play_btn.setIcon(style.standardIcon(QStyle.SP_MediaPlay))
+            self.play_btn.setToolTip('播放 (空格)')
 
     def _update_volume_icon(self):
         style = self.style()

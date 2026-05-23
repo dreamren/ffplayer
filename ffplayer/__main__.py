@@ -15,23 +15,24 @@ def main():
         ffplay_path = os.path.join(base, ffplay_name)
         if not os.path.isfile(ffplay_path):
             print(
-                'Error: ffplay not found!\n\n'
-                'Please put ffplay.exe (and ffprobe.exe, ffmpeg.exe) in:\n'
+                '错误：未找到 ffplay！\n\n'
+                '请将 ffplay.exe（以及 ffprobe.exe、ffmpeg.exe）放在：\n'
                 f'  {base}\n\n'
-                'Or add them to your system PATH.\n\n'
-                'Download from: https://ffmpeg.org/download.html\n'
+                '或添加到系统 PATH。\n\n'
+                '下载地址: https://ffmpeg.org/download.html\n'
                 '  - Windows ARM64: https://github.com/BtbN/FFmpeg-Builds/releases\n'
                 '  - Windows x64: https://www.gyan.dev/ffmpeg/builds/'
             )
             sys.exit(1)
 
     from PySide6.QtWidgets import QApplication
-    from PySide6.QtCore import Qt
 
     app = QApplication(sys.argv)
     app.setApplicationName('FFPlayer')
     app.setOrganizationName('FFPlayer')
-    app.setStyle('Fusion')
+
+    from ffplayer.styles import DARK_STYLE
+    app.setStyleSheet(DARK_STYLE)
 
     from ffplayer.config import Config
     from ffplayer.main_window import MainWindow
