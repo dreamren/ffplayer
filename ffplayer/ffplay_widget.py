@@ -156,7 +156,6 @@ class FFPlayWidget(QWidget):
         cmd = [
             self._ffplay_path,
             '-noborder',
-            '-fs',
             '-window_title', window_title,
             '-autoexit',
             '-stats',
@@ -337,7 +336,16 @@ class FFPlayWidget(QWidget):
             user32 = ctypes.windll.user32
             w = self.width()
             h = self.height()
+            SWP_NOCOPYBITS = 0x0100
+            SWP_NOMOVE = 0x0002
+            SWP_NOZORDER = 0x0004
+            user32.SetWindowPos(
+                self._ffplay_hwnd, 0, 0, 0, w, h,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOCOPYBITS,
+            )
             user32.MoveWindow(self._ffplay_hwnd, 0, 0, w, h, True)
+            user32.InvalidateRect(self._ffplay_hwnd, None, True)
+            user32.UpdateWindow(self._ffplay_hwnd)
         except Exception:
             pass
 

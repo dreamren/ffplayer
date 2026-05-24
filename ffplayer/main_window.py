@@ -364,25 +364,23 @@ class MainWindow(QMainWindow):
             if screen:
                 avail = screen.availableGeometry()
                 max_w = avail.width() - 40
-                max_h = avail.height() - 100
+                max_h = avail.height() - 120
                 ratio = min(max_w / w, max_h / h)
-                new_w = int(w * ratio)
-                new_h = int(h * ratio)
+                target_w = int(w * ratio)
+                target_h = int(h * ratio)
             else:
-                new_w, new_h = w, h
+                target_w, target_h = w, h
         else:
             factor = SIZE_MODE_FACTORS.get(mode, 1.0)
-            new_w = int(w * factor)
-            new_h = int(h * factor)
+            target_w = int(w * factor)
+            target_h = int(h * factor)
 
-        controls_height = self.controls.height()
-        menubar_height = self.menuBar().height()
-        new_h += controls_height + menubar_height
-
-        new_w = max(new_w, self.minimumWidth())
-        new_h = max(new_h, self.minimumHeight())
-
-        self.resize(new_w, new_h)
+        current_w = self.video.width()
+        current_h = self.video.height()
+        dw = target_w - current_w
+        dh = target_h - current_h
+        if dw != 0 or dh != 0:
+            self.resize(self.width() + dw, self.height() + dh)
 
     def _on_duration(self, duration):
         self.controls.set_duration(duration)
@@ -439,7 +437,7 @@ class MainWindow(QMainWindow):
             self,
             '关于 FFPlayer',
             '<h2>FFPlayer</h2>'
-            '<p>版本 1.3.0</p>'
+            '<p>版本 1.4.0</p>'
             '<p>基于 ffplay (ffmpeg) 的轻量级视频播放器</p>'
             '<p>针对 ARM64 软解优化</p>'
             '<p>使用 PySide6 + ffplay 子进程构建</p>',
