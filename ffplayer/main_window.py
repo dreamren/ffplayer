@@ -438,7 +438,7 @@ class MainWindow(QMainWindow):
             self,
             '关于 FFPlayer',
             '<h2>FFPlayer</h2>'
-            '<p>版本 1.7.0</p>'
+            '<p>版本 1.7.1</p>'
             '<p>基于 ffplay (ffmpeg) 的轻量级视频播放器</p>'
             '<p>针对 ARM64 软解优化</p>'
             '<p>使用 PySide6 + ffplay 子进程构建</p>',

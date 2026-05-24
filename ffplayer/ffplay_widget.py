@@ -80,6 +80,7 @@ class FFPlayWidget(QWidget):
         self._drag_target = None
         self._last_file_size = 0
         self._last_stderr_pos_time = 0
+        self._drag_tick_count = 0
 
         self._position_timer = QTimer(self)
         self._position_timer.setInterval(200)
@@ -394,6 +395,16 @@ class FFPlayWidget(QWidget):
         except Exception:
             pass
 
+    def _invalidate_ffplay(self):
+        if not self._ffplay_hwnd or sys.platform != 'win32':
+            return
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            user32.InvalidateRect(self._ffplay_hwnd, None, False)
+        except Exception:
+            pass
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._resize_ffplay()
@@ -509,13 +520,16 @@ class FFPlayWidget(QWidget):
             self.pause()
 
     def seek(self, position):
-        if not self._current_file or not self._ffplay_hwnd:
+        if not self._current_file:
             return
         target = max(0, min(self._duration, position))
-        self._position = target
-        self._start_position = target
-        self._start_time = time.time()
+        if not self._ffplay_hwnd:
+            self._position = target
+            self._start_ffplay(self._current_file, target)
+            self._is_paused = False
+            return
         self._drag_target = target
+        self._drag_tick_count = 0
         self.time_changed.emit(target)
         if not self._drag_seek_timer.isActive():
             self._drag_seek_timer.start()
@@ -540,6 +554,7 @@ class FFPlayWidget(QWidget):
 
     def start_drag_seek(self, target_position):
         self._drag_target = max(0, min(self._duration, target_position))
+        self._drag_tick_count = 0
         if not self._drag_seek_timer.isActive():
             self._drag_seek_timer.start()
 
@@ -551,6 +566,7 @@ class FFPlayWidget(QWidget):
         self._drag_seek_timer.stop()
         self._start_position = self._position
         self._start_time = time.time()
+        self._resize_ffplay()
 
     def _drag_seek_tick(self):
         if self._drag_target is None or not self._ffplay_hwnd:
@@ -562,7 +578,9 @@ class FFPlayWidget(QWidget):
             self._drag_seek_timer.stop()
             self._start_position = self._position
             self._start_time = time.time()
+            self._resize_ffplay()
             return
+        self._drag_tick_count += 1
         if diff > 0:
             if diff <= 10:
                 self._send_key(self.VK_RIGHT)
@@ -606,6 +624,9 @@ class FFPlayWidget(QWidget):
                     self._drag_target,
                 )
         self.time_changed.emit(self._position)
+        self._invalidate_ffplay()
+        if self._drag_tick_count % 5 == 0:
+            self._resize_ffplay()
 
     def stop(self):
         self._kill_process()
