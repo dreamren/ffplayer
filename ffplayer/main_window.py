@@ -389,8 +389,6 @@ class MainWindow(QMainWindow):
         self.controls.set_playing(state == 'playing')
 
     def _on_video_size(self, width, height):
-        if self.video._initial_size_set:
-            return
         self._video_width = width
         self._video_height = height
         self._apply_window_size(self.config.window_size_mode)
@@ -439,7 +437,7 @@ class MainWindow(QMainWindow):
             self,
             '关于 FFPlayer',
             '<h2>FFPlayer</h2>'
-            '<p>版本 1.4.0</p>'
+            '<p>版本 1.5.0</p>'
             '<p>基于 ffplay (ffmpeg) 的轻量级视频播放器</p>'
             '<p>针对 ARM64 软解优化</p>'
             '<p>使用 PySide6 + ffplay 子进程构建</p>',

@@ -30,6 +30,7 @@ class SeekSlider(QSlider):
         super().__init__(orientation, parent)
         self._duration = 0
         self._seeking = False
+        self._drag_occurred = False
         self.setRange(0, 10000)
         self.setValue(0)
         self.setCursor(Qt.PointingHandCursor)
@@ -47,13 +48,16 @@ class SeekSlider(QSlider):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._seeking = True
+            self._drag_occurred = False
             val = self._pos_from_event(event)
             self.setValue(val)
-            self._emit_drag_started()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._seeking:
+            if not self._drag_occurred:
+                self._drag_occurred = True
+                self._emit_drag_started()
             val = self._pos_from_event(event)
             self.setValue(val)
             self._emit_drag_moved()
@@ -62,7 +66,10 @@ class SeekSlider(QSlider):
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._seeking = False
-            self._emit_seek()
+            if self._drag_occurred:
+                self._emit_drag_ended()
+            else:
+                self._emit_seek()
         super().mouseReleaseEvent(event)
 
     def _pos_from_event(self, event):
@@ -79,11 +86,15 @@ class SeekSlider(QSlider):
             pos = self.value() / 10000.0 * self._duration
             self.drag_moved.emit(pos)
 
+    def _emit_drag_ended(self):
+        if self._duration > 0:
+            pos = self.value() / 10000.0 * self._duration
+            self.drag_ended.emit(pos)
+
     def _emit_seek(self):
         if self._duration > 0:
             pos = self.value() / 10000.0 * self._duration
             self.seek_requested.emit(pos)
-            self.drag_ended.emit(pos)
 
     @property
     def is_seeking(self):

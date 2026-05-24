@@ -8,6 +8,18 @@ from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, Signal, QTimer
 
 
+def _subprocess_run(cmd, **kwargs):
+    if sys.platform == 'win32':
+        kwargs.setdefault('creationflags', subprocess.CREATE_NO_WINDOW)
+    return subprocess.run(cmd, **kwargs)
+
+
+def _subprocess_popen(cmd, **kwargs):
+    if sys.platform == 'win32':
+        kwargs.setdefault('creationflags', subprocess.CREATE_NO_WINDOW)
+    return subprocess.Popen(cmd, **kwargs)
+
+
 class FFPlayWidget(QWidget):
     time_changed = Signal(float)
     duration_changed = Signal(float)
@@ -24,7 +36,6 @@ class FFPlayWidget(QWidget):
     VK_9 = 0x39
     VK_0 = 0x30
     VK_M = 0x4D
-    VK_F = 0x46
     VK_PGDN = 0x22
     VK_PGUP = 0x21
 
@@ -52,8 +63,6 @@ class FFPlayWidget(QWidget):
         self._pending_pause = False
         self._stderr_lines = []
         self._drag_target = None
-        self._is_live = False
-        self._initial_size_set = False
 
         self._position_timer = QTimer(self)
         self._position_timer.setInterval(200)
@@ -98,7 +107,7 @@ class FFPlayWidget(QWidget):
                 '-of', 'default=noprint_wrappers=1',
                 filepath,
             ]
-            result = subprocess.run(
+            result = _subprocess_run(
                 cmd, capture_output=True, text=True, timeout=15
             )
             duration = 0.0
@@ -126,41 +135,11 @@ class FFPlayWidget(QWidget):
         except Exception:
             return 0.0, 0, 0
 
-    def _check_if_live(self, filepath):
-        if not os.path.isfile(filepath):
-            return True
-        try:
-            cmd = [
-                self._ffprobe_path,
-                '-v', 'error',
-                '-analyzeduration', '10M',
-                '-probesize', '5M',
-                '-show_entries', 'format=duration',
-                '-of', 'default=noprint_wrappers=1',
-                filepath,
-            ]
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=5
-            )
-            for line in result.stdout.strip().split('\n'):
-                if line.startswith('duration='):
-                    d = line.split('=', 1)[1].strip().lower()
-                    if d in ('n/a', 'nan', '') or d == '0.000000':
-                        return True
-                    dur = float(d)
-                    if dur <= 0:
-                        return True
-                    return False
-        except Exception:
-            pass
-        return True
-
     def play(self, filepath):
         self.stop()
         self._current_file = filepath
         self._position = 0
         self._is_paused = False
-        self._initial_size_set = False
 
         duration, width, height = self._get_video_info(filepath)
         self._duration = duration
@@ -168,13 +147,10 @@ class FFPlayWidget(QWidget):
             self._video_width = width
             self._video_height = height
             self.video_size_changed.emit(width, height)
-            self._initial_size_set = True
         if duration > 0:
             self.duration_changed.emit(duration)
 
-        self._is_live = self._check_if_live(filepath)
-        if self._is_live or duration <= 0:
-            self._live_duration_timer.start()
+        self._live_duration_timer.start()
 
         self._start_ffplay(filepath, 0)
 
@@ -225,9 +201,7 @@ class FFPlayWidget(QWidget):
                 'stdout': subprocess.DEVNULL,
                 'stdin': subprocess.DEVNULL,
             }
-            if sys.platform == 'win32':
-                kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
-            self._process = subprocess.Popen(cmd, **kwargs)
+            self._process = _subprocess_popen(cmd, **kwargs)
         except FileNotFoundError:
             self.error_occurred.emit(
                 '未找到 ffplay！请将 ffplay.exe 放在程序目录或系统 PATH 中。'
@@ -252,7 +226,7 @@ class FFPlayWidget(QWidget):
         )
         self._stderr_thread.start()
 
-        QTimer.singleShot(200, self._try_embed_window)
+        QTimer.singleShot(100, self._try_embed_window)
 
         self._position_timer.start()
         self._monitor_timer.start()
@@ -322,9 +296,11 @@ class FFPlayWidget(QWidget):
 
             if not hwnd:
                 self._embed_retries += 1
-                if self._embed_retries < 25:
-                    QTimer.singleShot(150, self._try_embed_window)
+                if self._embed_retries < 30:
+                    QTimer.singleShot(50, self._try_embed_window)
                 return
+
+            user32.ShowWindow(hwnd, 0)
 
             self._ffplay_hwnd = hwnd
             qt_hwnd = int(self.winId())
@@ -405,7 +381,9 @@ class FFPlayWidget(QWidget):
         if not self._current_file:
             return
         if not os.path.isfile(self._current_file):
-            if not self._current_file.startswith(('http://', 'https://', 'rtmp://', 'rtsp://')):
+            if not self._current_file.startswith(
+                ('http://', 'https://', 'rtmp://', 'rtsp://')
+            ):
                 return
         try:
             cmd = [
@@ -417,7 +395,7 @@ class FFPlayWidget(QWidget):
                 '-of', 'default=noprint_wrappers=1',
                 self._current_file,
             ]
-            result = subprocess.run(
+            result = _subprocess_run(
                 cmd, capture_output=True, text=True, timeout=10
             )
             for line in result.stdout.strip().split('\n'):
@@ -575,7 +553,7 @@ class FFPlayWidget(QWidget):
     def volume(self, value):
         old_vol = self._volume
         self._volume = max(0, min(100, int(value)))
-        if self._ffplay_hwnd and sys.platform != 'win32' and old_vol != self._volume:
+        if self._ffplay_hwnd and old_vol != self._volume:
             diff = self._volume - old_vol
             if diff > 0:
                 steps = max(1, diff // 2)
@@ -616,7 +594,7 @@ class FFPlayWidget(QWidget):
             path,
         ]
         try:
-            subprocess.run(cmd, capture_output=True, timeout=10)
+            _subprocess_run(cmd, capture_output=True, timeout=10)
         except Exception:
             pass
 
