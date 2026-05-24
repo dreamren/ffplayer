@@ -389,6 +389,8 @@ class MainWindow(QMainWindow):
         self.controls.set_playing(state == 'playing')
 
     def _on_video_size(self, width, height):
+        if self.video._initial_size_set:
+            return
         self._video_width = width
         self._video_height = height
         self._apply_window_size(self.config.window_size_mode)

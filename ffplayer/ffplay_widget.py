@@ -53,6 +53,7 @@ class FFPlayWidget(QWidget):
         self._stderr_lines = []
         self._drag_target = None
         self._is_live = False
+        self._initial_size_set = False
 
         self._position_timer = QTimer(self)
         self._position_timer.setInterval(200)
@@ -90,13 +91,15 @@ class FFPlayWidget(QWidget):
             cmd = [
                 self._ffprobe_path,
                 '-v', 'error',
+                '-analyzeduration', '100M',
+                '-probesize', '50M',
                 '-show_entries',
                 'format=duration:stream=width,height',
                 '-of', 'default=noprint_wrappers=1',
                 filepath,
             ]
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=10
+                cmd, capture_output=True, text=True, timeout=15
             )
             duration = 0.0
             width = 0
@@ -125,11 +128,13 @@ class FFPlayWidget(QWidget):
 
     def _check_if_live(self, filepath):
         if not os.path.isfile(filepath):
-            return False
+            return True
         try:
             cmd = [
                 self._ffprobe_path,
                 '-v', 'error',
+                '-analyzeduration', '10M',
+                '-probesize', '5M',
                 '-show_entries', 'format=duration',
                 '-of', 'default=noprint_wrappers=1',
                 filepath,
@@ -142,16 +147,20 @@ class FFPlayWidget(QWidget):
                     d = line.split('=', 1)[1].strip().lower()
                     if d in ('n/a', 'nan', '') or d == '0.000000':
                         return True
+                    dur = float(d)
+                    if dur <= 0:
+                        return True
                     return False
         except Exception:
             pass
-        return False
+        return True
 
     def play(self, filepath):
         self.stop()
         self._current_file = filepath
         self._position = 0
         self._is_paused = False
+        self._initial_size_set = False
 
         duration, width, height = self._get_video_info(filepath)
         self._duration = duration
@@ -159,6 +168,7 @@ class FFPlayWidget(QWidget):
             self._video_width = width
             self._video_height = height
             self.video_size_changed.emit(width, height)
+            self._initial_size_set = True
         if duration > 0:
             self.duration_changed.emit(duration)
 
@@ -392,18 +402,23 @@ class FFPlayWidget(QWidget):
                     self.time_changed.emit(self._position)
 
     def _update_live_duration(self):
-        if not self._current_file or not os.path.isfile(self._current_file):
+        if not self._current_file:
             return
+        if not os.path.isfile(self._current_file):
+            if not self._current_file.startswith(('http://', 'https://', 'rtmp://', 'rtsp://')):
+                return
         try:
             cmd = [
                 self._ffprobe_path,
                 '-v', 'error',
+                '-analyzeduration', '100M',
+                '-probesize', '50M',
                 '-show_entries', 'format=duration',
                 '-of', 'default=noprint_wrappers=1',
                 self._current_file,
             ]
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=5
+                cmd, capture_output=True, text=True, timeout=10
             )
             for line in result.stdout.strip().split('\n'):
                 if line.startswith('duration='):
