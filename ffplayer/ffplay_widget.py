@@ -8,15 +8,30 @@ from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, Signal, QTimer
 
 
+def _build_startupinfo():
+    if sys.platform != 'win32':
+        return None
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0
+    return si
+
+
 def _subprocess_run(cmd, **kwargs):
     if sys.platform == 'win32':
         kwargs.setdefault('creationflags', subprocess.CREATE_NO_WINDOW)
+        si = _build_startupinfo()
+        if si:
+            kwargs.setdefault('startupinfo', si)
     return subprocess.run(cmd, **kwargs)
 
 
 def _subprocess_popen(cmd, **kwargs):
     if sys.platform == 'win32':
         kwargs.setdefault('creationflags', subprocess.CREATE_NO_WINDOW)
+        si = _build_startupinfo()
+        if si:
+            kwargs.setdefault('startupinfo', si)
     return subprocess.Popen(cmd, **kwargs)
 
 
@@ -63,6 +78,7 @@ class FFPlayWidget(QWidget):
         self._pending_pause = False
         self._stderr_lines = []
         self._drag_target = None
+        self._last_file_size = 0
 
         self._position_timer = QTimer(self)
         self._position_timer.setInterval(200)
@@ -77,7 +93,7 @@ class FFPlayWidget(QWidget):
         self._drag_seek_timer.timeout.connect(self._drag_seek_tick)
 
         self._live_duration_timer = QTimer(self)
-        self._live_duration_timer.setInterval(3000)
+        self._live_duration_timer.setInterval(2000)
         self._live_duration_timer.timeout.connect(self._update_live_duration)
 
     @staticmethod
@@ -140,6 +156,7 @@ class FFPlayWidget(QWidget):
         self._current_file = filepath
         self._position = 0
         self._is_paused = False
+        self._last_file_size = 0
 
         duration, width, height = self._get_video_info(filepath)
         self._duration = duration
@@ -178,6 +195,8 @@ class FFPlayWidget(QWidget):
             self._ffplay_path,
             '-noborder',
             '-fs',
+            '-x', str(max(320, self.width())),
+            '-y', str(max(180, self.height())),
             '-window_title', window_title,
             '-autoexit',
             '-stats',
@@ -226,7 +245,7 @@ class FFPlayWidget(QWidget):
         )
         self._stderr_thread.start()
 
-        QTimer.singleShot(100, self._try_embed_window)
+        QTimer.singleShot(30, self._try_embed_window)
 
         self._position_timer.start()
         self._monitor_timer.start()
@@ -274,6 +293,8 @@ class FFPlayWidget(QWidget):
                             h, m, s = int(parts[0]), int(parts[1]), float(parts[2])
                             pos = h * 3600 + m * 60 + s
                             self._position = pos
+                            self._start_position = pos
+                            self._start_time = time.time()
                             if self._drag_target is None:
                                 self.time_changed.emit(pos)
                         except (ValueError, IndexError):
@@ -296,8 +317,8 @@ class FFPlayWidget(QWidget):
 
             if not hwnd:
                 self._embed_retries += 1
-                if self._embed_retries < 30:
-                    QTimer.singleShot(50, self._try_embed_window)
+                if self._embed_retries < 80:
+                    QTimer.singleShot(15, self._try_embed_window)
                 return
 
             user32.ShowWindow(hwnd, 0)
@@ -337,6 +358,15 @@ class FFPlayWidget(QWidget):
                 (current_exstyle & ~WS_EX_APPWINDOW) | WS_EX_NOACTIVATE,
             )
 
+            SWP_FRAMECHANGED = 0x0020
+            SWP_NOZORDER = 0x0004
+            SWP_NOMOVE = 0x0002
+            SWP_NOSIZE = 0x0001
+            user32.SetWindowPos(
+                hwnd, 0, 0, 0, 0, 0,
+                SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE,
+            )
+
             self._resize_ffplay()
 
             if self._pending_pause:
@@ -369,46 +399,61 @@ class FFPlayWidget(QWidget):
     def _update_position(self):
         if self._is_paused or self._seeking:
             return
+        if self._drag_target is not None:
+            return
         if self._duration > 0 and self._position < self._duration:
             elapsed = time.time() - self._start_time
             approx_pos = self._start_position + elapsed * self._speed
             if abs(approx_pos - self._position) > 0.5:
                 self._position = min(approx_pos, self._duration)
-                if self._drag_target is None:
-                    self.time_changed.emit(self._position)
+                self.time_changed.emit(self._position)
 
     def _update_live_duration(self):
         if not self._current_file:
             return
-        if not os.path.isfile(self._current_file):
+        is_local = os.path.isfile(self._current_file)
+        if not is_local:
             if not self._current_file.startswith(
                 ('http://', 'https://', 'rtmp://', 'rtsp://')
             ):
                 return
+
+        if is_local:
+            try:
+                file_size = os.path.getsize(self._current_file)
+                if file_size == self._last_file_size:
+                    return
+                self._last_file_size = file_size
+            except OSError:
+                return
+
         try:
             cmd = [
                 self._ffprobe_path,
                 '-v', 'error',
                 '-analyzeduration', '100M',
                 '-probesize', '50M',
-                '-show_entries', 'format=duration',
+                '-show_entries', 'format=duration:stream=duration',
                 '-of', 'default=noprint_wrappers=1',
                 self._current_file,
             ]
             result = _subprocess_run(
-                cmd, capture_output=True, text=True, timeout=10
+                cmd, capture_output=True, text=True, timeout=15
             )
+            max_dur = self._duration
             for line in result.stdout.strip().split('\n'):
                 if line.startswith('duration='):
                     try:
                         d = line.split('=', 1)[1].strip().lower()
                         if d not in ('n/a', 'nan', ''):
-                            new_dur = float(d)
-                            if new_dur > self._duration:
-                                self._duration = new_dur
-                                self.duration_changed.emit(new_dur)
+                            val = float(d)
+                            if val > max_dur:
+                                max_dur = val
                     except (ValueError, IndexError):
                         pass
+            if max_dur > self._duration:
+                self._duration = max_dur
+                self.duration_changed.emit(max_dur)
         except Exception:
             pass
 
@@ -494,6 +539,9 @@ class FFPlayWidget(QWidget):
     def end_drag_seek(self, target_position):
         self._drag_target = None
         self._drag_seek_timer.stop()
+        self._start_position = self._position
+        self._start_time = time.time()
+        self._resize_ffplay()
 
     def _drag_seek_tick(self):
         if self._drag_target is None or not self._ffplay_hwnd:
@@ -531,6 +579,7 @@ class FFPlayWidget(QWidget):
                 self._send_key(self.VK_PGUP)
                 self._position = max(self._position - 600, self._drag_target)
         self.time_changed.emit(self._position)
+        self._resize_ffplay()
 
     def stop(self):
         self._kill_process()
