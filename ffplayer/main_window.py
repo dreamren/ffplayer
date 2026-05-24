@@ -311,6 +311,7 @@ class MainWindow(QMainWindow):
     def _set_volume(self, volume):
         self.video.volume = volume
         self._pre_mute_volume = volume if volume > 0 else self._pre_mute_volume
+        self.config.default_volume = volume
 
     def _toggle_mute(self):
         if self.video.volume > 0:
@@ -437,7 +438,7 @@ class MainWindow(QMainWindow):
             self,
             '关于 FFPlayer',
             '<h2>FFPlayer</h2>'
-            '<p>版本 1.6.0</p>'
+            '<p>版本 1.7.0</p>'
             '<p>基于 ffplay (ffmpeg) 的轻量级视频播放器</p>'
             '<p>针对 ARM64 软解优化</p>'
             '<p>使用 PySide6 + ffplay 子进程构建</p>',
@@ -546,6 +547,7 @@ class MainWindow(QMainWindow):
             new_vol = max(0, int(self.video.volume) - 5)
         self.video.volume = new_vol
         self.controls.set_volume(new_vol)
+        self.config.default_volume = new_vol
         self.statusBar().showMessage(f'音量: {new_vol}%', 1500)
 
     def mouseMoveEvent(self, event):
@@ -596,5 +598,6 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self._save_window_state()
         self._save_playback_position()
+        self.config.default_volume = int(self.video.volume)
         self.video.close_player()
         super().closeEvent(event)

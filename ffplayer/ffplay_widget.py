@@ -79,6 +79,7 @@ class FFPlayWidget(QWidget):
         self._stderr_lines = []
         self._drag_target = None
         self._last_file_size = 0
+        self._last_stderr_pos_time = 0
 
         self._position_timer = QTimer(self)
         self._position_timer.setInterval(200)
@@ -157,6 +158,7 @@ class FFPlayWidget(QWidget):
         self._position = 0
         self._is_paused = False
         self._last_file_size = 0
+        self._last_stderr_pos_time = 0
 
         duration, width, height = self._get_video_info(filepath)
         self._duration = duration
@@ -295,8 +297,8 @@ class FFPlayWidget(QWidget):
                             self._position = pos
                             self._start_position = pos
                             self._start_time = time.time()
-                            if self._drag_target is None:
-                                self.time_changed.emit(pos)
+                            self._last_stderr_pos_time = time.time()
+                            self.time_changed.emit(pos)
                         except (ValueError, IndexError):
                             pass
         except Exception:
@@ -401,12 +403,15 @@ class FFPlayWidget(QWidget):
             return
         if self._drag_target is not None:
             return
-        if self._duration > 0 and self._position < self._duration:
-            elapsed = time.time() - self._start_time
-            approx_pos = self._start_position + elapsed * self._speed
-            if abs(approx_pos - self._position) > 0.5:
-                self._position = min(approx_pos, self._duration)
-                self.time_changed.emit(self._position)
+        if self._duration <= 0 or self._position >= self._duration:
+            return
+        if time.time() - self._last_stderr_pos_time < 0.5:
+            return
+        elapsed = time.time() - self._start_time
+        approx_pos = self._start_position + elapsed * self._speed
+        if abs(approx_pos - self._position) > 0.5:
+            self._position = min(approx_pos, self._duration)
+            self.time_changed.emit(self._position)
 
     def _update_live_duration(self):
         if not self._current_file:
@@ -504,11 +509,16 @@ class FFPlayWidget(QWidget):
             self.pause()
 
     def seek(self, position):
-        if not self._current_file:
+        if not self._current_file or not self._ffplay_hwnd:
             return
-        self._position = max(0, position)
-        self._start_ffplay(self._current_file, self._position)
-        self._is_paused = False
+        target = max(0, min(self._duration, position))
+        self._position = target
+        self._start_position = target
+        self._start_time = time.time()
+        self._drag_target = target
+        self.time_changed.emit(target)
+        if not self._drag_seek_timer.isActive():
+            self._drag_seek_timer.start()
 
     def relative_seek(self, offset):
         if not self._ffplay_hwnd or not self._current_file:
@@ -541,14 +551,17 @@ class FFPlayWidget(QWidget):
         self._drag_seek_timer.stop()
         self._start_position = self._position
         self._start_time = time.time()
-        self._resize_ffplay()
 
     def _drag_seek_tick(self):
         if self._drag_target is None or not self._ffplay_hwnd:
             self._drag_seek_timer.stop()
             return
         diff = self._drag_target - self._position
-        if abs(diff) < 0.5:
+        if abs(diff) < 1.0:
+            self._drag_target = None
+            self._drag_seek_timer.stop()
+            self._start_position = self._position
+            self._start_time = time.time()
             return
         if diff > 0:
             if diff <= 10:
@@ -561,9 +574,16 @@ class FFPlayWidget(QWidget):
             elif diff <= 120:
                 self._send_key(self.VK_DOWN)
                 self._position = min(self._position + 60, self._drag_target)
-            else:
+            elif diff <= 1800:
                 self._send_key(self.VK_PGDN)
                 self._position = min(self._position + 600, self._drag_target)
+            else:
+                for _ in range(min(int(diff / 600), 3)):
+                    self._send_key(self.VK_PGDN)
+                self._position = min(
+                    self._position + 600 * min(int(diff / 600), 3),
+                    self._drag_target,
+                )
         else:
             if diff >= -10:
                 self._send_key(self.VK_LEFT)
@@ -575,11 +595,17 @@ class FFPlayWidget(QWidget):
             elif diff >= -120:
                 self._send_key(self.VK_UP)
                 self._position = max(self._position - 60, self._drag_target)
-            else:
+            elif diff >= -1800:
                 self._send_key(self.VK_PGUP)
                 self._position = max(self._position - 600, self._drag_target)
+            else:
+                for _ in range(min(int(-diff / 600), 3)):
+                    self._send_key(self.VK_PGUP)
+                self._position = max(
+                    self._position - 600 * min(int(-diff / 600), 3),
+                    self._drag_target,
+                )
         self.time_changed.emit(self._position)
-        self._resize_ffplay()
 
     def stop(self):
         self._kill_process()
