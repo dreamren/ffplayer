@@ -52,6 +52,7 @@ class FFPlayWidget(QWidget):
         self._pending_pause = False
         self._stderr_lines = []
         self._drag_target = None
+        self._is_live = False
 
         self._position_timer = QTimer(self)
         self._position_timer.setInterval(200)
@@ -64,6 +65,10 @@ class FFPlayWidget(QWidget):
         self._drag_seek_timer = QTimer(self)
         self._drag_seek_timer.setInterval(30)
         self._drag_seek_timer.timeout.connect(self._drag_seek_tick)
+
+        self._live_duration_timer = QTimer(self)
+        self._live_duration_timer.setInterval(3000)
+        self._live_duration_timer.timeout.connect(self._update_live_duration)
 
     @staticmethod
     def _find_binary(name):
@@ -99,7 +104,9 @@ class FFPlayWidget(QWidget):
             for line in result.stdout.strip().split('\n'):
                 if line.startswith('duration='):
                     try:
-                        duration = float(line.split('=', 1)[1])
+                        d = line.split('=', 1)[1]
+                        if d.strip().lower() not in ('n/a', 'nan', ''):
+                            duration = float(d)
                     except (ValueError, IndexError):
                         pass
                 elif line.startswith('width='):
@@ -116,6 +123,30 @@ class FFPlayWidget(QWidget):
         except Exception:
             return 0.0, 0, 0
 
+    def _check_if_live(self, filepath):
+        if not os.path.isfile(filepath):
+            return False
+        try:
+            cmd = [
+                self._ffprobe_path,
+                '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1',
+                filepath,
+            ]
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=5
+            )
+            for line in result.stdout.strip().split('\n'):
+                if line.startswith('duration='):
+                    d = line.split('=', 1)[1].strip().lower()
+                    if d in ('n/a', 'nan', '') or d == '0.000000':
+                        return True
+                    return False
+        except Exception:
+            pass
+        return False
+
     def play(self, filepath):
         self.stop()
         self._current_file = filepath
@@ -130,6 +161,10 @@ class FFPlayWidget(QWidget):
             self.video_size_changed.emit(width, height)
         if duration > 0:
             self.duration_changed.emit(duration)
+
+        self._is_live = self._check_if_live(filepath)
+        if self._is_live or duration <= 0:
+            self._live_duration_timer.start()
 
         self._start_ffplay(filepath, 0)
 
@@ -156,6 +191,7 @@ class FFPlayWidget(QWidget):
         cmd = [
             self._ffplay_path,
             '-noborder',
+            '-fs',
             '-window_title', window_title,
             '-autoexit',
             '-stats',
@@ -336,16 +372,7 @@ class FFPlayWidget(QWidget):
             user32 = ctypes.windll.user32
             w = self.width()
             h = self.height()
-            SWP_NOCOPYBITS = 0x0100
-            SWP_NOMOVE = 0x0002
-            SWP_NOZORDER = 0x0004
-            user32.SetWindowPos(
-                self._ffplay_hwnd, 0, 0, 0, w, h,
-                SWP_NOMOVE | SWP_NOZORDER | SWP_NOCOPYBITS,
-            )
             user32.MoveWindow(self._ffplay_hwnd, 0, 0, w, h, True)
-            user32.InvalidateRect(self._ffplay_hwnd, None, True)
-            user32.UpdateWindow(self._ffplay_hwnd)
         except Exception:
             pass
 
@@ -364,6 +391,34 @@ class FFPlayWidget(QWidget):
                 if self._drag_target is None:
                     self.time_changed.emit(self._position)
 
+    def _update_live_duration(self):
+        if not self._current_file or not os.path.isfile(self._current_file):
+            return
+        try:
+            cmd = [
+                self._ffprobe_path,
+                '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1',
+                self._current_file,
+            ]
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=5
+            )
+            for line in result.stdout.strip().split('\n'):
+                if line.startswith('duration='):
+                    try:
+                        d = line.split('=', 1)[1].strip().lower()
+                        if d not in ('n/a', 'nan', ''):
+                            new_dur = float(d)
+                            if new_dur > self._duration:
+                                self._duration = new_dur
+                                self.duration_changed.emit(new_dur)
+                    except (ValueError, IndexError):
+                        pass
+        except Exception:
+            pass
+
     def _monitor_process(self):
         if self._process and self._process.poll() is not None:
             exit_code = self._process.poll()
@@ -372,6 +427,7 @@ class FFPlayWidget(QWidget):
             self._monitor_timer.stop()
             self._drag_seek_timer.stop()
             self._drag_target = None
+            self._live_duration_timer.stop()
             if exit_code == 0:
                 self.eof_reached.emit()
             elif exit_code != 0 and self._stderr_lines:
@@ -445,7 +501,6 @@ class FFPlayWidget(QWidget):
     def end_drag_seek(self, target_position):
         self._drag_target = None
         self._drag_seek_timer.stop()
-        self.seek(max(0, min(self._duration, target_position)))
 
     def _drag_seek_tick(self):
         if self._drag_target is None or not self._ffplay_hwnd:
@@ -488,6 +543,7 @@ class FFPlayWidget(QWidget):
         self._kill_process()
         self._position_timer.stop()
         self._monitor_timer.stop()
+        self._live_duration_timer.stop()
         self._position = 0
         self._is_paused = True
         self.state_changed.emit('paused')
@@ -504,7 +560,7 @@ class FFPlayWidget(QWidget):
     def volume(self, value):
         old_vol = self._volume
         self._volume = max(0, min(100, int(value)))
-        if self._ffplay_hwnd and sys.platform == 'win32' and old_vol != self._volume:
+        if self._ffplay_hwnd and sys.platform != 'win32' and old_vol != self._volume:
             diff = self._volume - old_vol
             if diff > 0:
                 steps = max(1, diff // 2)
